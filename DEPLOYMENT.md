@@ -11,146 +11,81 @@ This guide details step-by-step instructions to deploy **SyncBooth** to producti
 |          Frontend Client           |          |           Backend Server           |
 |  (Vercel / Netlify / Cloudflare)   |  HTTPS   |     (Render / Railway / Fly.io)    |
 |   React + Vite SPA on CDN Edge     |<-------->|   Express API & Socket.IO Signaling|
-+------------------------------------+  Socket  +-----------------+------------------+
-                                                                  |
-                                                                  | Persistent SQLite
-                                                                  v
-                                                        +------------------+
-                                                        |  SQLite / Cloud  |
-                                                        |   syncbooth.db   |
-                                                        +------------------+
++------------------------------------+  Socket  +------------------------------------+
 ```
 
 ---
 
-## 🚀 Step 1: Prepare Git Repository
+## 🚀 Step 1: Push Working Code to GitHub
 
-Ensure all changes are committed and pushed to your GitHub or Git hosting service:
+Ensure all changes are committed and pushed:
 
 ```bash
-# Verify working tree status
 git status
-
-# Commit any pending changes
 git add .
-git commit -m "Prepare SyncBooth for production deployment"
+git commit -m "fix: remove native sqlite3 dependency to resolve GLIBC Linux deployment error"
 git push origin main
 ```
 
-Ensure `.env`, `node_modules/`, and `.db` files are excluded by `.gitignore`.
+Ensure `.env` and `node_modules/` are excluded by `.gitignore`.
 
 ---
 
-## ⚡ Step 2: Deploy Backend Server
+## ⚡ Step 2: Configure Render Backend Deployment
 
-Deploy the Node.js Express + Socket.IO server to a cloud provider like **Render**, **Railway**, or **Fly.io**.
+Deploy the Node.js Express + Socket.IO server to **Render**:
 
-### Option A: Render (Web Service)
 1. Log into [Render Dashboard](https://dashboard.render.com).
 2. Click **New +** -> **Web Service**.
-3. Connect your GitHub repository.
-4. Set the **Root Directory** to `server`.
-5. Set **Build Command**: `npm install`
-6. Set **Start Command**: `npm start` (runs `node src/server.js`).
-7. Select your instance plan (e.g. Free or Starter).
+3. Connect your GitHub repository: `sivareddytalapareddy/SyncBooth`.
+4. Configure service settings:
+   - **Name**: `syncbooth-backend`
+   - **Root Directory**: `server`
+   - **Environment / Runtime**: `Node`
+   - **Build Command**: `npm install`
+   - **Start Command**: `npm start`
+   - **Instance Type**: `Free`
 
 ---
 
 ## 🔑 Step 3: Configure Backend Environment Variables
 
-In your backend provider dashboard (e.g., Render Environment Variables), add the following environment variables:
-
-| Variable | Recommended Value | Description |
-|---|---|---|
-| `NODE_ENV` | `production` | Set Node.js production mode |
-| `PORT` | `10000` (or host provided) | Server HTTP listening port |
-| `CLIENT_URL` | `https://your-syncbooth-frontend.vercel.app` | Production frontend origin for CORS |
-| `JWT_SECRET` | `generate_a_long_random_64_char_secret_string` | Secret key used to sign JWT authentication tokens |
-| `DATABASE_PATH` | `./syncbooth.db` (or persistent disk path) | SQLite database storage path |
-
----
-
-## 🗄️ Step 4: Configure Database
-
-SyncBooth uses a persistent SQLite database (`syncbooth.db`) by default:
-
-1. **Persistent Disk (Render/Railway)**: On Render, add a **Disk** mounted at `/var/data` and set `DATABASE_PATH=/var/data/syncbooth.db`.
-2. **Auto-Initialization**: The database tables (`users`, `strips`) automatically self-initialize on first startup.
-
----
-
-## 🌐 Step 5: Deploy Frontend Client
-
-Deploy the React Vite application to **Vercel** or **Netlify**.
-
-### Option A: Vercel
-1. Log into [Vercel Dashboard](https://vercel.com).
-2. Click **Add New...** -> **Project**.
-3. Import your GitHub repository.
-4. Set **Root Directory** to `client`.
-5. Framework Preset: **Vite**.
-6. Build Command: `npm run build`
-7. Output Directory: `dist`
-
----
-
-## 🔧 Step 6: Configure Frontend Environment Variables
-
-In Vercel / Netlify environment variable settings, configure:
+In Render **Environment Variables** tab, add:
 
 | Variable | Value | Description |
 |---|---|---|
-| `VITE_SERVER_URL` | `https://your-backend-api.onrender.com` | Production backend server URL |
-
-> ⚠️ **Note**: After adding `VITE_SERVER_URL`, trigger a re-deploy on Vercel so Vite bakes the production URL into the client bundle.
-
----
-
-## 🔗 Step 7: Connect Frontend to Backend
-
-Verify that your deployed frontend can communicate with your backend:
-
-1. Open your browser DevTools network tab on the deployed frontend (`https://your-syncbooth-frontend.vercel.app`).
-2. Verify that API calls target `https://your-backend-api.onrender.com/api/health`.
-3. Check for successful `200 OK` status response.
+| `NODE_ENV` | `production` | Set Node.js production environment |
+| `PORT` | `5001` (or leave default port assigned by Render) | Server listening port |
+| `CLIENT_URL` | `https://your-frontend.vercel.app` (or `*` during initial setup) | Allowed origin for CORS |
+| `JWT_SECRET` | `your_secure_random_64_character_jwt_secret` | Secret key for JWT signing |
 
 ---
 
-## 🛡️ Step 8: Configure CORS & WebSockets
+## 🌐 Step 4: Deploy Frontend Client (Vercel)
 
-1. Ensure `CLIENT_URL` on the backend matches the exact origin of your production frontend (e.g. `https://your-syncbooth-frontend.vercel.app`).
-2. Do **not** use `CLIENT_URL=*` in production.
-3. Socket.IO will automatically establish WebSocket connections over HTTPS (`wss://`).
-
----
-
-## 🧪 Step 9: Test Production Authentication Flow
-
-Run the end-to-end verification checklist on the live site:
-
-1. Visit `https://your-syncbooth-frontend.vercel.app/register`.
-2. Register a new user (`Name: Production Test`, `Email: test@example.com`).
-3. Verify successful creation and immediate authentication state in Navbar.
-4. Log out and navigate to `/login`.
-5. Log in with `test@example.com` and verify profile page access.
-6. Verify session persistence after hard-refreshing the page.
+1. Log into [Vercel Dashboard](https://vercel.com/new).
+2. Import repository `sivareddytalapareddy/SyncBooth`.
+3. Set **Root Directory**: `client`.
+4. Framework Preset: **Vite**.
+5. Build Command: `npm run build`
+6. Output Directory: `dist`
+7. Add **Environment Variable**:
+   - `VITE_SERVER_URL` = `https://your-backend-api.onrender.com` (Your Render backend URL)
+8. Click **Deploy**.
 
 ---
 
-## 📷 Step 10: Test Real-Time Photobooth Session
+## 🛡️ Step 5: Configure CORS & WebSockets
 
-1. Click **Create Shared Booth** on Window A to get a room code (e.g. `X9K2P1`).
-2. Open Window B (or send link to another device) `/?room=X9K2P1`.
-3. Allow camera access.
-4. Confirm low-latency WebRTC P2P stream connection.
-5. Apply live CSS filters and trigger 3-2-1 snapshot countdown.
-6. Download the composited photobooth strip JPEG file.
+1. Update `CLIENT_URL` on Render to match your exact production frontend URL (e.g. `https://syncbooth.vercel.app`).
+2. Socket.IO will automatically establish WebSocket connections over HTTPS (`wss://`).
 
 ---
 
 ## 📋 Security Posture Checklist
 
-- [x] Passwords salted and hashed with `bcryptjs` (cost factor 10).
+- [x] Pure JS authentication layer (zero native C++ compilation or GLIBC issues).
+- [x] Passwords salted and hashed with `bcryptjs`.
 - [x] JWT sessions signed with secret `JWT_SECRET`.
 - [x] Strict CORS origin validation on Express REST API & Socket.IO.
 - [x] HTTPS enforced on WebRTC media streams (`getUserMedia` requires HTTPS).

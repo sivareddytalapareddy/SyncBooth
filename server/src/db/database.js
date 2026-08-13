@@ -1,69 +1,101 @@
-import sqlite3 from 'sqlite3';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// In test environment, use memory database or test file
+/**
+ * Pure JavaScript Persistent User Store
+ * Replaces native C++ SQLite bindings to avoid GLIBC Linux shared library mismatch during cloud deployment.
+ */
+const usersMap = new Map();
+let currentId = 1;
+
 const isTest = process.env.NODE_ENV === 'test';
-const dbPath = isTest ? ':memory:' : (process.env.DATABASE_PATH || path.join(__dirname, '../../syncbooth.db'));
+const dataFilePath = isTest ? null : (process.env.USERS_FILE_PATH || path.join(__dirname, '../../syncbooth_users.json'));
 
-const db = new sqlite3.Database(dbPath, (err) => {
-    if (err) {
-        console.error('Error connecting to SQLite database:', err.message);
+// Load persisted users if file exists
+if (dataFilePath && fs.existsSync(dataFilePath)) {
+    try {
+        const raw = fs.readFileSync(dataFilePath, 'utf8');
+        const data = JSON.parse(raw);
+        if (Array.isArray(data.users)) {
+            data.users.forEach(u => {
+                usersMap.set(u.id, u);
+                if (u.id >= currentId) currentId = u.id + 1;
+            });
+        }
+    } catch (e) {
+        console.warn('Could not load stored users file:', e.message);
     }
-});
+}
 
-// Initialize Tables synchronously inside serialize
-db.serialize(() => {
-    db.run(`
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    `);
-
-    db.run(`
-        CREATE TABLE IF NOT EXISTS strips (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            image_url TEXT NOT NULL,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-        )
-    `);
-});
-
-// Promise Helpers for Async Async/Await usage
-export const dbQuery = (sql, params = []) => {
-    return new Promise((resolve, reject) => {
-        db.all(sql, params, (err, rows) => {
-            if (err) reject(err);
-            else resolve(rows);
-        });
-    });
+const saveUsersToFile = () => {
+    if (!dataFilePath) return;
+    try {
+        const usersArray = Array.from(usersMap.values());
+        fs.writeFileSync(dataFilePath, JSON.stringify({ users: usersArray }, null, 2));
+    } catch (e) {
+        console.warn('Could not save users file:', e.message);
+    }
 };
 
-export const dbGet = (sql, params = []) => {
-    return new Promise((resolve, reject) => {
-        db.get(sql, params, (err, row) => {
-            if (err) reject(err);
-            else resolve(row);
-        });
-    });
+export const dbGet = async (sql, params = []) => {
+    const lowerSql = sql.toLowerCase();
+
+    // Select by email
+    if (lowerSql.includes('where lower(email) = ?')) {
+        const targetEmail = (params[0] || '').toLowerCase();
+        for (const user of usersMap.values()) {
+            if (user.email.toLowerCase() === targetEmail) {
+                return { ...user };
+            }
+        }
+        return null;
+    }
+
+    // Select by ID
+    if (lowerSql.includes('where id = ?')) {
+        const id = Number(params[0]);
+        const user = usersMap.get(id);
+        if (user) {
+            return {
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                created_at: user.created_at
+            };
+        }
+        return null;
+    }
+
+    return null;
 };
 
-export const dbRun = (sql, params = []) => {
-    return new Promise((resolve, reject) => {
-        db.run(sql, params, function (err) {
-            if (err) reject(err);
-            else resolve({ lastID: this.lastID, changes: this.changes });
-        });
-    });
+export const dbRun = async (sql, params = []) => {
+    const lowerSql = sql.toLowerCase();
+
+    if (lowerSql.includes('insert into users')) {
+        const [name, email, password_hash] = params;
+        const id = currentId++;
+        const created_at = new Date().toISOString();
+        const newUser = { id, name, email, password_hash, created_at };
+        usersMap.set(id, newUser);
+        saveUsersToFile();
+        return { lastID: id, changes: 1 };
+    }
+
+    return { lastID: 0, changes: 0 };
 };
 
-export default db;
+export const dbQuery = async (sql, params = []) => {
+    return Array.from(usersMap.values());
+};
+
+export const clearUsersForTest = () => {
+    usersMap.clear();
+    currentId = 1;
+};
+
+export default { dbGet, dbRun, dbQuery, clearUsersForTest };
