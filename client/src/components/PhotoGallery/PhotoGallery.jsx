@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-export const PhotoGallery = ({ photos, isSoloMode }) => {
+export const PhotoGallery = ({ photos, isSoloMode, roomCode }) => {
     const [downloading, setDownloading] = useState(false);
 
     if (!photos || photos.length === 0) {
@@ -12,6 +12,14 @@ export const PhotoGallery = ({ photos, isSoloMode }) => {
             </div>
         );
     }
+
+    const formatDateStr = () => {
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, '0');
+        const day = String(now.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    };
 
     const handleDownloadStrip = () => {
         if (photos.length === 0 || downloading) return;
@@ -54,14 +62,17 @@ export const PhotoGallery = ({ photos, isSoloMode }) => {
                         ctx.fillStyle = '#111111';
                         ctx.font = 'bold 36px Poppins, sans-serif';
                         ctx.textAlign = 'center';
-                        ctx.fillText('SyncBooth 2025', canvas.width / 2, canvas.height - 50);
+                        ctx.fillText('SyncBooth 2026', canvas.width / 2, canvas.height - 50);
+
+                        // Format filename: syncbooth-A7K92P-2026-08-13.png
+                        const dateStr = formatDateStr();
+                        const codeSegment = roomCode || (isSoloMode ? 'SOLO' : 'SHARED');
+                        const fileName = `syncbooth-${codeSegment}-${dateStr}.png`;
 
                         // Trigger download
                         const link = document.createElement('a');
-                        link.download = isSoloMode 
-                            ? `syncbooth-solo-${Date.now()}.jpg` 
-                            : `syncbooth-shared-${Date.now()}.jpg`;
-                        link.href = canvas.toDataURL('image/jpeg', 0.92);
+                        link.download = fileName;
+                        link.href = canvas.toDataURL('image/png', 0.95);
                         link.click();
                         setDownloading(false);
                     }
@@ -93,3 +104,5 @@ export const PhotoGallery = ({ photos, isSoloMode }) => {
         </div>
     );
 };
+
+export default PhotoGallery;

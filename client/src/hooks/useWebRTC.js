@@ -12,14 +12,15 @@ const RTC_CONFIG = {
 /**
  * Custom Hook: WebRTC Peer Connection & Signaling Lifecycle
  * @param {MediaStream|null} localStream 
- * @param {string|null} roomId 
+ * @param {string|null} roomCode 
  */
-export const useWebRTC = (localStream, roomId) => {
+export const useWebRTC = (localStream, roomCode) => {
     const [remoteStream, setRemoteStream] = useState(null);
     const [connectionState, setConnectionState] = useState('disconnected'); // disconnected | connecting | connected | failed
     const [partnerSocketId, setPartnerSocketId] = useState(null);
 
     const peerConnectionRef = useRef(null);
+    const pendingCandidatesRef = useRef([]);
     const localStreamRef = useRef(localStream);
     localStreamRef.current = localStream;
 
@@ -32,6 +33,7 @@ export const useWebRTC = (localStream, roomId) => {
             peerConnectionRef.current.close();
             peerConnectionRef.current = null;
         }
+        pendingCandidatesRef.current = [];
         setRemoteStream(null);
         setConnectionState('disconnected');
     }, []);
@@ -63,7 +65,8 @@ export const useWebRTC = (localStream, roomId) => {
         pc.onicecandidate = (event) => {
             if (event.candidate && targetSocketId) {
                 socket.emit('ice-candidate', {
-                    roomId,
+                    roomCode,
+                    roomId: roomCode,
                     targetSocketId,
                     candidate: event.candidate
                 });
@@ -77,7 +80,7 @@ export const useWebRTC = (localStream, roomId) => {
         };
 
         return pc;
-    }, [cleanupPeerConnection, roomId]);
+    }, [cleanupPeerConnection, roomCode]);
 
     // Initiator creates Offer
     const initiateOffer = useCallback(async (targetSocketId) => {
@@ -90,7 +93,8 @@ export const useWebRTC = (localStream, roomId) => {
             await pc.setLocalDescription(offer);
 
             socket.emit('offer', {
-                roomId,
+                roomCode,
+                roomId: roomCode,
                 targetSocketId,
                 offer
             });
@@ -98,13 +102,13 @@ export const useWebRTC = (localStream, roomId) => {
             console.error('[WebRTC] Error initiating offer:', err);
             setConnectionState('failed');
         }
-    }, [createPeerConnection, roomId]);
+    }, [createPeerConnection, roomCode]);
 
     // Setup Socket.IO WebRTC signaling listeners
     useEffect(() => {
-        if (!roomId) return;
+        if (!roomCode) return;
 
-        // Peer joined: as the room host/existing member, initiate offer
+        // Peer joined: as host or existing member, initiate offer
         const handlePeerJoined = ({ socketId }) => {
             console.log('[WebRTC] Peer joined room, starting offer negotiation:', socketId);
             initiateOffer(socketId);
@@ -118,11 +122,19 @@ export const useWebRTC = (localStream, roomId) => {
                 setConnectionState('connecting');
 
                 await pc.setRemoteDescription(new RTCSessionDescription(offer));
+                
+                // Flush pending ICE candidates if any were buffered
+                while (pendingCandidatesRef.current.length > 0) {
+                    const cand = pendingCandidatesRef.current.shift();
+                    await pc.addIceCandidate(new RTCIceCandidate(cand));
+                }
+
                 const answer = await pc.createAnswer();
                 await pc.setLocalDescription(answer);
 
                 socket.emit('answer', {
-                    roomId,
+                    roomCode,
+                    roomId: roomCode,
                     targetSocketId: senderSocketId,
                     answer
                 });
@@ -139,6 +151,12 @@ export const useWebRTC = (localStream, roomId) => {
             if (pc) {
                 try {
                     await pc.setRemoteDescription(new RTCSessionDescription(answer));
+
+                    // Flush pending ICE candidates
+                    while (pendingCandidatesRef.current.length > 0) {
+                        const cand = pendingCandidatesRef.current.shift();
+                        await pc.addIceCandidate(new RTCIceCandidate(cand));
+                    }
                 } catch (err) {
                     console.error('[WebRTC] Error setting remote answer:', err);
                 }
@@ -150,7 +168,11 @@ export const useWebRTC = (localStream, roomId) => {
             const pc = peerConnectionRef.current;
             if (pc && candidate) {
                 try {
-                    await pc.addIceCandidate(new RTCIceCandidate(candidate));
+                    if (pc.remoteDescription) {
+                        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+                    } else {
+                        pendingCandidatesRef.current.push(candidate);
+                    }
                 } catch (err) {
                     console.error('[WebRTC] Error adding ICE candidate:', err);
                 }
@@ -176,7 +198,7 @@ export const useWebRTC = (localStream, roomId) => {
             socket.off('ice-candidate', handleIceCandidate);
             socket.off('peer-left', handlePeerLeft);
         };
-    }, [roomId, initiateOffer, createPeerConnection, cleanupPeerConnection]);
+    }, [roomCode, initiateOffer, createPeerConnection, cleanupPeerConnection]);
 
     // Clean up on unmount or room leave
     useEffect(() => {
@@ -192,3 +214,5 @@ export const useWebRTC = (localStream, roomId) => {
         cleanupPeerConnection
     };
 };
+
+export default useWebRTC;

@@ -72,7 +72,7 @@ export const Navbar = ({ onNavigate, currentView }) => {
                                         className={currentView === 'profile' ? 'active' : ''}
                                         onClick={() => handleNavClick('profile')}
                                     >
-                                        <i className="fa-solid fa-user-circle"></i> {user?.name || 'Profile'}
+                                        <i className="fa-solid fa-user-circle"></i> {user?.username || user?.name || 'Profile'}
                                     </button>
                                 </li>
                                 <li>

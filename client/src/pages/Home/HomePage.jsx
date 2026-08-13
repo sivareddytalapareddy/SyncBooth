@@ -1,15 +1,30 @@
 import React, { useState } from 'react';
+import { useAuth } from '../../context/AuthContext.jsx';
 import { isValidRoomCode } from '../../utils/roomId.js';
-import { getStoredUsername, setStoredUsername } from '../../utils/storage.js';
 
-export const HomePage = ({ onSelectSolo, onCreateShared, onJoinShared, error, onClearError }) => {
+export const HomePage = ({ 
+    onSelectSolo, 
+    onCreateShared, 
+    onJoinShared, 
+    onNavigateToLogin,
+    onNavigateToRegister,
+    error, 
+    onClearError 
+}) => {
+    const { user, isAuthenticated, logout } = useAuth();
     const [roomInput, setRoomInput] = useState('');
-    const [username, setUsername] = useState(getStoredUsername() || 'Guest');
     const [validationErr, setValidationErr] = useState('');
+
+    const displayUsername = user?.username || user?.name || 'Guest';
 
     const handleJoinSubmit = (e) => {
         e.preventDefault();
         setValidationErr('');
+
+        if (!isAuthenticated) {
+            onNavigateToLogin();
+            return;
+        }
 
         const cleanCode = roomInput.trim().toUpperCase();
         if (!isValidRoomCode(cleanCode)) {
@@ -17,18 +32,19 @@ export const HomePage = ({ onSelectSolo, onCreateShared, onJoinShared, error, on
             return;
         }
 
-        setStoredUsername(username);
-        onJoinShared(cleanCode, username);
+        onJoinShared(cleanCode, displayUsername);
     };
 
     const handleCreateClick = () => {
-        setStoredUsername(username);
-        onCreateShared(username);
+        if (!isAuthenticated) {
+            onNavigateToLogin();
+            return;
+        }
+        onCreateShared(displayUsername);
     };
 
     const handleSoloClick = () => {
-        setStoredUsername(username);
-        onSelectSolo(username);
+        onSelectSolo(displayUsername);
     };
 
     return (
@@ -52,24 +68,29 @@ export const HomePage = ({ onSelectSolo, onCreateShared, onJoinShared, error, on
             <div className="title-wrapper">
                 <span className="year-tag">EST</span>
                 <h1>photobooth</h1>
-                <span className="year-tag">2025</span>
+                <span className="year-tag">2026</span>
             </div>
 
             <p className="subtitle">
                 Step back in time. Capture memories solo or share the flash with someone miles away in real time.
             </p>
 
-            {/* Optional Name Input */}
-            <div style={{ marginBottom: '25px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <label style={{ fontSize: '0.9rem', color: '#666', fontWeight: 500 }}>Your Name:</label>
-                <input
-                    type="text"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    placeholder="Enter your name"
-                    style={{ padding: '8px 16px', borderRadius: '20px', border: '1px solid #ffd1e0', outline: 'none', fontSize: '0.9rem' }}
-                />
-            </div>
+            {isAuthenticated ? (
+                <div style={{ marginBottom: '20px', textAlign: 'center' }}>
+                    <h3 style={{ fontSize: '1.25rem', color: 'var(--text-dark)', fontWeight: 600 }}>
+                        Welcome, <span style={{ color: 'var(--primary-color)' }}>{displayUsername}</span> 👋
+                    </h3>
+                </div>
+            ) : (
+                <div className="auth-prompt-bar" style={{ marginBottom: '20px', display: 'flex', gap: '12px', justifyContent: 'center' }}>
+                    <button className="btn btn-secondary btn-sm" onClick={onNavigateToLogin}>
+                        <i className="fa-solid fa-right-to-bracket"></i> Login
+                    </button>
+                    <button className="btn btn-sm" onClick={onNavigateToRegister}>
+                        <i className="fa-solid fa-user-plus"></i> Create Account
+                    </button>
+                </div>
+            )}
 
             {/* Mode Selection Buttons */}
             <div className="mode-selection">
@@ -77,8 +98,13 @@ export const HomePage = ({ onSelectSolo, onCreateShared, onJoinShared, error, on
                     <i className="fa-solid fa-user"></i> Solo Booth
                 </button>
                 <button className="btn" onClick={handleCreateClick}>
-                    <i className="fa-solid fa-user-group"></i> Create Shared Booth
+                    <i className="fa-solid fa-user-group"></i> Create Booth
                 </button>
+                {isAuthenticated && (
+                    <button className="btn btn-outline" onClick={logout}>
+                        <i className="fa-solid fa-arrow-right-from-bracket"></i> Logout
+                    </button>
+                )}
             </div>
 
             {/* Join Room Box */}
@@ -97,7 +123,7 @@ export const HomePage = ({ onSelectSolo, onCreateShared, onJoinShared, error, on
                         }}
                     />
                     <button type="submit" className="btn btn-secondary">
-                        Join Room
+                        Join Booth
                     </button>
                 </form>
             </div>
@@ -110,3 +136,5 @@ export const HomePage = ({ onSelectSolo, onCreateShared, onJoinShared, error, on
         </main>
     );
 };
+
+export default HomePage;

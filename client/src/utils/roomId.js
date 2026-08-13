@@ -9,5 +9,5 @@ export const isValidRoomCode = (code) => {
 
 export const getRoomShareUrl = (roomId) => {
     const origin = window.location.origin;
-    return `${origin}/?room=${roomId}`;
+    return `${origin}/room/${roomId}`;
 };

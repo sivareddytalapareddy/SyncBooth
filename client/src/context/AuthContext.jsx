@@ -10,19 +10,14 @@ export const AuthProvider = ({ children }) => {
     const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY) || null);
     const [isLoading, setIsLoading] = useState(true);
 
-    // Verify session on app load
+    // Verify session on app boot
     useEffect(() => {
         const verifySession = async () => {
-            if (!token) {
-                setIsLoading(false);
-                return;
-            }
-
             try {
-                const userData = await getMeApi(token);
+                const userData = await getMeApi();
                 setUser(userData);
             } catch (err) {
-                console.warn('Session verification failed, logging out:', err.message);
+                // If stored token or cookie is invalid/expired, clear local auth
                 localStorage.removeItem(TOKEN_KEY);
                 setToken(null);
                 setUser(null);
@@ -32,27 +27,33 @@ export const AuthProvider = ({ children }) => {
         };
 
         verifySession();
-    }, [token]);
+    }, []);
 
     const login = async (email, password) => {
         const data = await loginApi(email, password);
-        localStorage.setItem(TOKEN_KEY, data.token);
-        setToken(data.token);
+        if (data.token) {
+            localStorage.setItem(TOKEN_KEY, data.token);
+            setToken(data.token);
+        }
         setUser(data.user);
         return data.user;
     };
 
-    const register = async (name, email, password) => {
-        const data = await registerApi(name, email, password);
-        localStorage.setItem(TOKEN_KEY, data.token);
-        setToken(data.token);
+    const register = async (username, email, password) => {
+        const data = await registerApi(username, email, password);
+        if (data.token) {
+            localStorage.setItem(TOKEN_KEY, data.token);
+            setToken(data.token);
+        }
         setUser(data.user);
         return data.user;
     };
 
     const logout = async () => {
-        if (token) {
-            await logoutApi(token);
+        try {
+            await logoutApi();
+        } catch {
+            // Ignore error
         }
         localStorage.removeItem(TOKEN_KEY);
         setToken(null);
@@ -83,3 +84,5 @@ export const useAuth = () => {
     }
     return context;
 };
+
+export default AuthContext;

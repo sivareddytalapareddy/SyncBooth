@@ -4,7 +4,7 @@ import { app } from '../src/server.js';
 
 describe('Authentication API Endpoints', () => {
     const testUser = {
-        name: 'Test Photoboother',
+        username: 'TestPhotoboother',
         email: `test_${Date.now()}@syncbooth.app`,
         password: 'password123'
     };
@@ -20,8 +20,8 @@ describe('Authentication API Endpoints', () => {
         expect(res.body.success).toBe(true);
         expect(res.body.data.token).toBeDefined();
         expect(res.body.data.user.email).toBe(testUser.email.toLowerCase());
-        expect(res.body.data.user.name).toBe(testUser.name);
-        expect(res.body.data.user.password_hash).toBeUndefined();
+        expect(res.body.data.user.username).toBe(testUser.username);
+        expect(res.body.data.user.passwordHash).toBeUndefined();
 
         authToken = res.body.data.token;
     });
@@ -33,13 +33,13 @@ describe('Authentication API Endpoints', () => {
 
         expect(res.status).toBe(400);
         expect(res.body.success).toBe(false);
-        expect(res.body.error).toContain('already exists');
+        expect(res.body.message).toContain('already exists');
     });
 
     it('POST /api/auth/register - should reject invalid email or short password', async () => {
         const res = await request(app)
             .post('/api/auth/register')
-            .send({ name: 'Short', email: 'invalid-email', password: '123' });
+            .send({ username: 'Short', email: 'invalid-email', password: '123' });
 
         expect(res.status).toBe(400);
         expect(res.body.success).toBe(false);
@@ -63,7 +63,7 @@ describe('Authentication API Endpoints', () => {
 
         expect(res.status).toBe(401);
         expect(res.body.success).toBe(false);
-        expect(res.body.error).toBe('Invalid email or password.');
+        expect(res.body.message).toBe('Invalid email or password.');
     });
 
     it('GET /api/auth/me - should return authenticated user profile', async () => {
@@ -81,7 +81,7 @@ describe('Authentication API Endpoints', () => {
             .get('/api/auth/me')
             .set('Authorization', 'Bearer invalid_token_xyz');
 
-        expect(res.status).toBe(403);
+        expect(res.status).toBe(401);
         expect(res.body.success).toBe(false);
     });
 });

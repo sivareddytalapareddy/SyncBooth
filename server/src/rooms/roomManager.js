@@ -1,12 +1,19 @@
-/**
- * Room Manager Service
- * Handles in-memory room lifecycle, participant tracking, capacity enforcement,
- * and state transitions (WAITING, CONNECTED, CAPTURING, DISCONNECTED).
- */
+import mongoose from 'mongoose';
+import Room from '../models/Room.js';
 
 class RoomManager {
     constructor() {
-        /** @type {Map<string, { id: string, participants: Array<{socketId: string, username: string}>, maxCapacity: number, status: string, createdAt: number }>} */
+        /** 
+         * @type {Map<string, {
+         *   roomCode: string,
+         *   dbId: string,
+         *   hostUserId: string,
+         *   participants: Array<{ socketId: string, userId: string, username: string }>,
+         *   maxCapacity: number,
+         *   status: string,
+         *   createdAt: number
+         * }>} 
+         */
         this.rooms = new Map();
     }
 
@@ -14,84 +21,128 @@ class RoomManager {
      * Generate a unique 6-character uppercase alphanumeric room code.
      * @returns {string} E.g., "A7K92P"
      */
-    generateRoomId() {
+    generateRoomCode() {
         const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Excluded ambiguous chars 0, O, 1, I
-        let roomId = '';
+        let code = '';
         let attempts = 0;
         
         do {
-            roomId = '';
+            code = '';
             for (let i = 0; i < 6; i++) {
-                roomId += chars.charAt(Math.floor(Math.random() * chars.length));
+                code += chars.charAt(Math.floor(Math.random() * chars.length));
             }
             attempts++;
             if (attempts > 1000) {
-                throw new Error('Failed to generate unique room ID');
+                throw new Error('Failed to generate unique room code');
             }
-        } while (this.rooms.has(roomId));
+        } while (this.rooms.has(code));
 
-        return roomId;
+        return code;
     }
 
     /**
-     * Validate room ID string format.
-     * @param {string} roomId 
+     * Validate room code format.
+     * @param {string} roomCode 
      * @returns {boolean}
      */
-    isValidRoomId(roomId) {
-        if (!roomId || typeof roomId !== 'string') return false;
-        const cleaned = roomId.trim().toUpperCase();
+    isValidRoomCode(roomCode) {
+        if (!roomCode || typeof roomCode !== 'string') return false;
+        const cleaned = roomCode.trim().toUpperCase();
         return /^[A-Z0-9]{6}$/.test(cleaned);
     }
 
     /**
-     * Create a new private booth room.
-     * @returns {Object} Newly created room object
+     * Create a new private photo booth room.
+     * @param {string} hostUserId 
+     * @param {string} [hostUsername='Host'] 
+     * @returns {Promise<Object>}
      */
-    createRoom() {
-        const roomId = this.generateRoomId();
+    async createRoom(hostUserId = null, hostUsername = 'Host') {
+        const roomCode = this.generateRoomCode();
+        
+        let dbRoom = null;
+        if (hostUserId && mongoose.connection.readyState === 1 && mongoose.Types.ObjectId.isValid(hostUserId)) {
+            try {
+                dbRoom = await Room.create({
+                    roomCode,
+                    hostUserId,
+                    status: 'WAITING'
+                });
+            } catch (err) {
+                console.warn('[RoomManager] Failed to persist room in MongoDB, keeping in memory:', err.message);
+            }
+        }
+
         const room = {
-            id: roomId,
+            roomCode,
+            dbId: dbRoom ? dbRoom._id.toString() : null,
+            hostUserId: hostUserId ? hostUserId.toString() : null,
             participants: [],
             maxCapacity: 2,
             status: 'WAITING',
             createdAt: Date.now()
         };
-        this.rooms.set(roomId, room);
+
+        this.rooms.set(roomCode, room);
         return room;
     }
 
     /**
-     * Retrieve room by ID.
-     * @param {string} roomId 
-     * @returns {Object|null}
+     * Retrieve room by code from memory or DB.
+     * @param {string} roomCode 
+     * @returns {Promise<Object|null>}
      */
-    getRoom(roomId) {
-        if (!this.isValidRoomId(roomId)) return null;
-        return this.rooms.get(roomId.trim().toUpperCase()) || null;
+    async getRoom(roomCode) {
+        if (!this.isValidRoomCode(roomCode)) return null;
+        const cleanCode = roomCode.trim().toUpperCase();
+        
+        let room = this.rooms.get(cleanCode);
+        if (!room && mongoose.connection.readyState === 1) {
+            // Check DB fallback
+            try {
+                const dbRoom = await Room.findOne({ roomCode: cleanCode, status: { $ne: 'CLOSED' } });
+                if (dbRoom) {
+                    room = {
+                        roomCode: dbRoom.roomCode,
+                        dbId: dbRoom._id.toString(),
+                        hostUserId: dbRoom.hostUserId.toString(),
+                        participants: [],
+                        maxCapacity: 2,
+                        status: dbRoom.status,
+                        createdAt: dbRoom.createdAt ? new Date(dbRoom.createdAt).getTime() : Date.now()
+                    };
+                    this.rooms.set(cleanCode, room);
+                }
+            } catch (err) {
+                console.warn('[RoomManager] DB room lookup error:', err.message);
+            }
+        }
+
+        return room || null;
     }
 
     /**
-     * Join a room.
-     * @param {string} roomId 
+     * Join a room with socket connection.
+     * @param {string} roomCode 
      * @param {string} socketId 
+     * @param {string} [userId=null] 
      * @param {string} [username='Guest'] 
-     * @returns {Object} { room, participant }
+     * @returns {Promise<{ room: Object, participant: Object }>}
      */
-    joinRoom(roomId, socketId, username = 'Guest') {
-        const cleanId = roomId ? roomId.trim().toUpperCase() : '';
-        const room = this.getRoom(cleanId);
+    async joinRoom(roomCode, socketId, userId = null, username = 'Guest') {
+        const cleanCode = roomCode ? roomCode.trim().toUpperCase() : '';
+        const room = await this.getRoom(cleanCode);
 
-        if (!room) {
-            const error = new Error('Room not found');
+        if (!room || room.status === 'CLOSED') {
+            const error = new Error('Room not found or has been closed');
             error.code = 'ROOM_NOT_FOUND';
             throw error;
         }
 
-        // Check if user is already in this room
-        const existingParticipant = room.participants.find(p => p.socketId === socketId);
-        if (existingParticipant) {
-            return { room, participant: existingParticipant };
+        // Check if socket already in room
+        const existingBySocket = room.participants.find(p => p.socketId === socketId);
+        if (existingBySocket) {
+            return { room, participant: existingBySocket };
         }
 
         // Enforce maximum capacity of 2
@@ -103,13 +154,24 @@ class RoomManager {
 
         const participant = {
             socketId,
+            userId: userId ? userId.toString() : null,
             username: username.trim() || `User ${room.participants.length + 1}`
         };
 
         room.participants.push(participant);
 
         if (room.participants.length === 2) {
-            room.status = 'CONNECTED';
+            room.status = 'ACTIVE';
+            if (room.dbId && userId && mongoose.connection.readyState === 1 && mongoose.Types.ObjectId.isValid(userId)) {
+                try {
+                    await Room.findByIdAndUpdate(room.dbId, {
+                        participantUserId: userId,
+                        status: 'ACTIVE'
+                    });
+                } catch (err) {
+                    console.warn('[RoomManager] DB update room ACTIVE failed:', err.message);
+                }
+            }
         } else {
             room.status = 'WAITING';
         }
@@ -118,19 +180,32 @@ class RoomManager {
     }
 
     /**
-     * Remove a participant from a room.
-     * @param {string} roomId 
+     * Leave a room.
+     * @param {string} roomCode 
      * @param {string} socketId 
-     * @returns {Object|null} Updated room status or null if destroyed
+     * @returns {Promise<Object|null>} Updated room or null if closed
      */
-    leaveRoom(roomId, socketId) {
-        const room = this.getRoom(roomId);
+    async leaveRoom(roomCode, socketId) {
+        const room = await this.getRoom(roomCode);
         if (!room) return null;
 
+        const leavingParticipant = room.participants.find(p => p.socketId === socketId);
         room.participants = room.participants.filter(p => p.socketId !== socketId);
 
-        if (room.participants.length === 0) {
-            this.rooms.delete(room.id);
+        // If host leaves or room is now empty -> Close Room
+        const isHost = leavingParticipant && room.hostUserId && leavingParticipant.userId === room.hostUserId;
+
+        if (room.participants.length === 0 || isHost) {
+            room.status = 'CLOSED';
+            this.rooms.delete(room.roomCode);
+
+            if (room.dbId && mongoose.connection.readyState === 1) {
+                try {
+                    await Room.findByIdAndUpdate(room.dbId, { status: 'CLOSED' });
+                } catch (err) {
+                    console.warn('[RoomManager] DB update room CLOSED failed:', err.message);
+                }
+            }
             return null;
         } else {
             room.status = 'WAITING';
@@ -139,21 +214,20 @@ class RoomManager {
     }
 
     /**
-     * Handle socket disconnect: remove socket from any room it belonged to.
+     * Handle socket disconnect.
      * @param {string} socketId 
-     * @returns {Array<{ roomId: string, remainingParticipants: Array }>}
+     * @returns {Promise<Array<{ roomCode: string, updatedRoom: Object|null }>>}
      */
-    handleDisconnect(socketId) {
+    async handleDisconnect(socketId) {
         const affectedRooms = [];
         
-        for (const [roomId, room] of this.rooms.entries()) {
+        for (const [code, room] of this.rooms.entries()) {
             const isParticipant = room.participants.some(p => p.socketId === socketId);
             if (isParticipant) {
-                const updatedRoom = this.leaveRoom(roomId, socketId);
+                const updatedRoom = await this.leaveRoom(code, socketId);
                 affectedRooms.push({
-                    roomId,
-                    updatedRoom,
-                    remainingParticipants: updatedRoom ? updatedRoom.participants : []
+                    roomCode: code,
+                    updatedRoom
                 });
             }
         }
@@ -162,17 +236,17 @@ class RoomManager {
     }
 
     /**
-     * Clear inactive rooms older than specified max age (default 2 hours).
-     * @param {number} maxAgeMs 
+     * Clean inactive rooms older than 2 hours.
      */
     cleanStaleRooms(maxAgeMs = 2 * 60 * 60 * 1000) {
         const now = Date.now();
-        for (const [roomId, room] of this.rooms.entries()) {
+        for (const [code, room] of this.rooms.entries()) {
             if (now - room.createdAt > maxAgeMs) {
-                this.rooms.delete(roomId);
+                this.rooms.delete(code);
             }
         }
     }
 }
 
 export const roomManager = new RoomManager();
+export default roomManager;

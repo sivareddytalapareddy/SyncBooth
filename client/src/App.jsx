@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext.jsx';
 import { Navbar } from './components/Navbar/Navbar.jsx';
 import { Footer } from './components/Footer/Footer.jsx';
@@ -16,24 +16,28 @@ function MainApp() {
     const [view, setView] = useState('home'); // 'home' | 'about' | 'login' | 'register' | 'profile' | 'solo' | 'shared'
     const { user, isAuthenticated, isLoading: isAuthLoading } = useAuth();
     
-    // Determine active username from auth or localStorage guest name
-    const activeUsername = user?.name || getStoredUsername() || 'Guest';
+    // Determine active username from auth
+    const activeUsername = user?.username || user?.name || getStoredUsername() || 'Guest';
     const [username, setUsername] = useState(activeUsername);
+    const [pendingRoomCode, setPendingRoomCode] = useState(null);
 
     useEffect(() => {
-        if (user?.name) {
-            setUsername(user.name);
-            setStoredUsername(user.name);
+        if (user?.username || user?.name) {
+            const nameToUse = user.username || user.name;
+            setUsername(nameToUse);
+            setStoredUsername(nameToUse);
         }
     }, [user]);
 
     const {
+        roomCode,
         roomId,
         room,
         roomStatus,
         error: roomError,
         peerFilter,
         isCountdownActive,
+        partnerDisconnected,
         setIsCountdownActive,
         createNewRoom,
         joinRoom,
@@ -43,15 +47,29 @@ function MainApp() {
         clearError
     } = useRoom(null, username);
 
-    // Sync URL parameters & direct room link joining
+    // Sync URL path & query parameters for direct shareable links (e.g. /room/A7K92P or ?room=A7K92P)
     useEffect(() => {
+        if (isAuthLoading) return;
+
+        const path = window.location.pathname;
         const urlParams = new URLSearchParams(window.location.search);
-        const roomCode = urlParams.get('room');
-        if (roomCode) {
-            joinRoom(roomCode);
-            setView('shared');
+        let extractedCode = urlParams.get('room');
+
+        if (!extractedCode && path.startsWith('/room/')) {
+            extractedCode = path.replace('/room/', '').trim();
         }
-    }, [joinRoom]);
+
+        if (extractedCode) {
+            const cleanCode = extractedCode.toUpperCase();
+            if (isAuthenticated) {
+                joinRoom(cleanCode);
+                setView('shared');
+            } else {
+                setPendingRoomCode(cleanCode);
+                setView('login');
+            }
+        }
+    }, [isAuthLoading, isAuthenticated, joinRoom]);
 
     const handleNavigate = (viewName) => {
         if (view === 'shared') {
@@ -60,9 +78,9 @@ function MainApp() {
         setView(viewName);
         clearError();
 
-        // Clean room URL param if leaving room
-        if (window.location.search && viewName !== 'shared') {
-            window.history.replaceState({}, document.title, window.location.pathname);
+        // Clean URL pathname/search if leaving shared booth
+        if (viewName !== 'shared') {
+            window.history.replaceState({}, document.title, '/');
         }
     };
 
@@ -75,30 +93,53 @@ function MainApp() {
     };
 
     const handleCreateShared = async (name) => {
+        if (!isAuthenticated) {
+            setView('login');
+            return;
+        }
         if (name) {
             setUsername(name);
             setStoredUsername(name);
         }
-        const createdId = await createNewRoom();
-        if (createdId) {
+        const createdCode = await createNewRoom();
+        if (createdCode) {
+            window.history.replaceState({}, document.title, `/room/${createdCode}`);
             setView('shared');
         }
     };
 
     const handleJoinShared = (code, name) => {
+        if (!isAuthenticated) {
+            setPendingRoomCode(code);
+            setView('login');
+            return;
+        }
         if (name) {
             setUsername(name);
             setStoredUsername(name);
         }
         joinRoom(code);
+        window.history.replaceState({}, document.title, `/room/${code}`);
         setView('shared');
     };
+
+    const handleSuccessAuth = useCallback(() => {
+        if (pendingRoomCode) {
+            const codeToJoin = pendingRoomCode;
+            setPendingRoomCode(null);
+            joinRoom(codeToJoin);
+            window.history.replaceState({}, document.title, `/room/${codeToJoin}`);
+            setView('shared');
+        } else {
+            setView('home');
+        }
+    }, [pendingRoomCode, joinRoom]);
 
     const handleGoHome = () => {
         handleNavigate('home');
     };
 
-    // Avoid initial flash while checking authentication state
+    // Avoid initial flash while verifying auth session
     if (isAuthLoading) {
         return (
             <div className="auth-loading-screen">
@@ -118,6 +159,8 @@ function MainApp() {
                         onSelectSolo={handleSelectSolo}
                         onCreateShared={handleCreateShared}
                         onJoinShared={handleJoinShared}
+                        onNavigateToLogin={() => handleNavigate('login')}
+                        onNavigateToRegister={() => handleNavigate('register')}
                         error={roomError}
                         onClearError={clearError}
                     />
@@ -134,7 +177,7 @@ function MainApp() {
                     <LoginPage
                         onNavigateToRegister={() => handleNavigate('register')}
                         onGoHome={handleGoHome}
-                        onSuccessLogin={() => handleNavigate('home')}
+                        onSuccessLogin={handleSuccessAuth}
                     />
                 )}
 
@@ -142,7 +185,7 @@ function MainApp() {
                     <RegisterPage
                         onNavigateToLogin={() => handleNavigate('login')}
                         onGoHome={handleGoHome}
-                        onSuccessRegister={() => handleNavigate('home')}
+                        onSuccessRegister={handleSuccessAuth}
                     />
                 )}
 
@@ -158,14 +201,16 @@ function MainApp() {
                     <SoloBoothPage onGoHome={handleGoHome} />
                 )}
 
-                {view === 'shared' && roomId && (
+                {view === 'shared' && (roomCode || roomId) && (
                     <SharedBoothPage
-                        roomId={roomId}
+                        roomId={roomCode || roomId}
+                        roomCode={roomCode || roomId}
                         room={room}
                         roomStatus={roomStatus}
                         roomError={roomError}
                         peerFilter={peerFilter}
                         isCountdownActive={isCountdownActive}
+                        partnerDisconnected={partnerDisconnected}
                         setIsCountdownActive={setIsCountdownActive}
                         triggerCountdown={triggerCountdown}
                         broadcastFilter={broadcastFilter}

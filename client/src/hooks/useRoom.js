@@ -1,35 +1,38 @@
 import { useState, useEffect, useCallback } from 'react';
 import { socket, connectSocket } from '../services/socket.js';
-import { createRoomApi, getRoomApi } from '../services/api.js';
+import { createRoomApi, getRoomApi, joinRoomApi, leaveRoomApi } from '../services/api.js';
 
 /**
  * Custom Hook: Room Lifecycle & Socket Event Coordination
  */
-export const useRoom = (initialRoomId = null, username = 'Guest') => {
-    const [roomId, setRoomId] = useState(initialRoomId);
+export const useRoom = (initialRoomCode = null, username = 'Guest') => {
+    const [roomCode, setRoomCode] = useState(initialRoomCode);
     const [room, setRoom] = useState(null);
-    const [roomStatus, setRoomStatus] = useState('IDLE'); // IDLE | WAITING | CONNECTED | CAPTURING | ERROR
+    const [roomStatus, setRoomStatus] = useState('IDLE'); // IDLE | WAITING | ACTIVE | CONNECTED | CAPTURING | ERROR
     const [error, setError] = useState(null);
     const [isHost, setIsHost] = useState(false);
     const [peerFilter, setPeerFilter] = useState(null);
     const [isCountdownActive, setIsCountdownActive] = useState(false);
+    const [partnerDisconnected, setPartnerDisconnected] = useState(false);
 
     // Create a new room
     const createNewRoom = useCallback(async () => {
         try {
             setError(null);
+            setPartnerDisconnected(false);
             setRoomStatus('CREATING');
 
-            const newRoom = await createRoomApi();
-            setRoomId(newRoom.id);
-            setRoom(newRoom);
+            const roomData = await createRoomApi();
+            const code = roomData.roomCode || roomData.id;
+            setRoomCode(code);
+            setRoom(roomData.room || roomData);
             setIsHost(true);
 
             // Connect socket and join room
             connectSocket();
-            socket.emit('join-room', { roomId: newRoom.id, username });
+            socket.emit('join-room', { roomCode: code, roomId: code, username });
             setRoomStatus('WAITING');
-            return newRoom.id;
+            return code;
         } catch (err) {
             console.error('[useRoom] Create room error:', err);
             setError(err.message || 'Failed to create room');
@@ -45,20 +48,18 @@ export const useRoom = (initialRoomId = null, username = 'Guest') => {
 
         try {
             setError(null);
+            setPartnerDisconnected(false);
             setRoomStatus('JOINING');
 
             // Pre-validate room via REST API
-            const existingRoom = await getRoomApi(cleanCode);
-            if (existingRoom.participants.length >= 2) {
-                throw new Error('Room is full (Maximum 2 participants allowed)');
-            }
-
-            setRoomId(cleanCode);
-            setRoom(existingRoom);
+            const roomData = await joinRoomApi(cleanCode).catch(() => getRoomApi(cleanCode));
+            
+            setRoomCode(cleanCode);
+            setRoom(roomData.room || roomData);
             setIsHost(false);
 
             connectSocket();
-            socket.emit('join-room', { roomId: cleanCode, username });
+            socket.emit('join-room', { roomCode: cleanCode, roomId: cleanCode, username });
         } catch (err) {
             console.error('[useRoom] Join room error:', err);
             setError(err.message || 'Unable to join room');
@@ -67,55 +68,70 @@ export const useRoom = (initialRoomId = null, username = 'Guest') => {
     }, [username]);
 
     // Leave room
-    const leaveRoom = useCallback(() => {
-        if (roomId) {
-            socket.emit('leave-room', { roomId });
+    const leaveRoom = useCallback(async () => {
+        if (roomCode) {
+            socket.emit('leave-room', { roomCode, roomId: roomCode });
+            await leaveRoomApi(roomCode);
         }
-        setRoomId(null);
+        setRoomCode(null);
         setRoom(null);
         setRoomStatus('IDLE');
         setError(null);
         setIsHost(false);
-    }, [roomId]);
+        setPartnerDisconnected(false);
+    }, [roomCode]);
 
     // Trigger synchronized countdown across both participants
     const triggerCountdown = useCallback(() => {
-        if (roomId && socket.connected) {
-            socket.emit('start-countdown', { roomId });
+        if (roomCode && socket.connected) {
+            socket.emit('start-countdown', { roomCode, roomId: roomCode });
         }
-    }, [roomId]);
+    }, [roomCode]);
 
     // Broadcast filter change
     const broadcastFilter = useCallback((filterObj) => {
-        if (roomId && socket.connected) {
+        if (roomCode && socket.connected) {
             socket.emit('select-filter', {
-                roomId,
+                roomCode,
+                roomId: roomCode,
                 filterName: filterObj.name,
                 filterClass: filterObj.class,
                 css: filterObj.css
             });
         }
-    }, [roomId]);
+    }, [roomCode]);
 
     // Socket Event Listeners
     useEffect(() => {
-        if (!roomId) return;
+        if (!roomCode) return;
 
         const handleRoomJoined = ({ room: joinedRoom }) => {
             console.log('[useRoom] Successfully joined room:', joinedRoom);
-            setRoom(joinedRoom);
-            setRoomStatus(joinedRoom.status);
+            if (joinedRoom) setRoom(joinedRoom);
+            setRoomStatus(joinedRoom?.status || 'WAITING');
         };
 
         const handleRoomReady = ({ room: readyRoom }) => {
             console.log('[useRoom] Room ready (2 participants):', readyRoom);
-            setRoom(readyRoom);
-            setRoomStatus('CONNECTED');
+            if (readyRoom) setRoom(readyRoom);
+            setRoomStatus('ACTIVE');
+            setPartnerDisconnected(false);
+        };
+
+        const handlePeerJoined = ({ username: peerName }) => {
+            console.log('[useRoom] Partner joined:', peerName);
+            setRoomStatus('ACTIVE');
+            setPartnerDisconnected(false);
+        };
+
+        const handlePeerLeft = () => {
+            console.log('[useRoom] Partner left/disconnected');
+            setPartnerDisconnected(true);
+            setRoomStatus('WAITING');
         };
 
         const handleRoomUpdated = ({ room: updatedRoom }) => {
-            setRoom(updatedRoom);
-            setRoomStatus(updatedRoom.status);
+            if (updatedRoom) setRoom(updatedRoom);
         };
 
         const handleRoomError = ({ message }) => {
@@ -134,6 +150,8 @@ export const useRoom = (initialRoomId = null, username = 'Guest') => {
 
         socket.on('room-joined', handleRoomJoined);
         socket.on('room-ready', handleRoomReady);
+        socket.on('peer-joined', handlePeerJoined);
+        socket.on('peer-left', handlePeerLeft);
         socket.on('room-updated', handleRoomUpdated);
         socket.on('room-error', handleRoomError);
         socket.on('peer-filter-selected', handlePeerFilterSelected);
@@ -142,21 +160,25 @@ export const useRoom = (initialRoomId = null, username = 'Guest') => {
         return () => {
             socket.off('room-joined', handleRoomJoined);
             socket.off('room-ready', handleRoomReady);
+            socket.off('peer-joined', handlePeerJoined);
+            socket.off('peer-left', handlePeerLeft);
             socket.off('room-updated', handleRoomUpdated);
             socket.off('room-error', handleRoomError);
             socket.off('peer-filter-selected', handlePeerFilterSelected);
             socket.off('countdown-started', handleCountdownStarted);
         };
-    }, [roomId]);
+    }, [roomCode]);
 
     return {
-        roomId,
+        roomCode,
+        roomId: roomCode,
         room,
         roomStatus,
         error,
         isHost,
         peerFilter,
         isCountdownActive,
+        partnerDisconnected,
         setIsCountdownActive,
         createNewRoom,
         joinRoom,
@@ -166,3 +188,5 @@ export const useRoom = (initialRoomId = null, username = 'Guest') => {
         clearError: () => setError(null)
     };
 };
+
+export default useRoom;

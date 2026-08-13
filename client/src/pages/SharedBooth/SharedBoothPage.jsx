@@ -15,19 +15,22 @@ import { getStoredFilter, setStoredFilter } from '../../utils/storage.js';
 
 export const SharedBoothPage = ({
     roomId,
+    roomCode,
     room,
     roomStatus,
     roomError,
     peerFilter,
     isCountdownActive,
+    partnerDisconnected,
     setIsCountdownActive,
     triggerCountdown,
     broadcastFilter,
     onLeaveRoom,
     username
 }) => {
+    const activeRoomCode = roomCode || roomId;
     const { stream: localStream, error: cameraError, loading: cameraLoading, startCamera, stopCamera } = useCamera();
-    const { remoteStream } = useWebRTC(localStream, roomId);
+    const { remoteStream } = useWebRTC(localStream, activeRoomCode);
 
     const [activeFilter, setActiveFilter] = useState(() => {
         const stored = getStoredFilter();
@@ -87,7 +90,7 @@ export const SharedBoothPage = ({
     return (
         <div className="view-section booth-container">
             <RoomHeader
-                roomId={roomId}
+                roomId={activeRoomCode}
                 roomStatus={roomStatus}
                 participantCount={participantCount}
                 onLeaveRoom={onLeaveRoom}
@@ -95,11 +98,20 @@ export const SharedBoothPage = ({
 
             <ErrorMessage message={roomError || cameraError} />
 
+            {partnerDisconnected && (
+                <div className="error-banner" style={{ background: '#fff5f5', borderLeft: '4px solid #e53e3e', padding: '12px 16px', margin: '10px auto', maxWidth: '600px', borderRadius: '8px' }}>
+                    <span style={{ color: '#c53030', fontWeight: 600 }}>
+                        <i className="fa-solid fa-user-slash" style={{ marginRight: '8px' }}></i>
+                        Your partner disconnected. Waiting for partner to reconnect...
+                    </span>
+                </div>
+            )}
+
             {cameraLoading && <Loading text="Initializing local camera..." />}
 
             {/* Waiting for second participant modal */}
             {roomStatus === 'WAITING' && (
-                <RoomInviteModal roomId={roomId} />
+                <RoomInviteModal roomId={activeRoomCode} roomCode={activeRoomCode} />
             )}
 
             {/* Booth active view when connected or capturing */}
@@ -132,9 +144,11 @@ export const SharedBoothPage = ({
                         </button>
                     </div>
 
-                    <PhotoGallery photos={photos} isSoloMode={false} />
+                    <PhotoGallery photos={photos} isSoloMode={false} roomCode={activeRoomCode} />
                 </>
             )}
         </div>
     );
 };
+
+export default SharedBoothPage;
