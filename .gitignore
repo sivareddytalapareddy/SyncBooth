@@ -11,6 +11,10 @@ build/
 .env.development.local
 .env.production.local
 
+# Database
+*.db
+syncbooth.db
+
 # Logs
 *.log
 npm-debug.log*

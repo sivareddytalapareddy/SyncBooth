@@ -36,3 +36,67 @@ export const checkHealthApi = async () => {
     const res = await fetch(`${BASE_URL}/api/health`);
     return res.ok;
 };
+
+/**
+ * Authentication REST API Endpoints
+ */
+export const registerApi = async (name, email, password) => {
+    const res = await fetch(`${BASE_URL}/api/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, password })
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        throw new Error(data.error || 'Registration failed.');
+    }
+
+    return data.data; // { token, user }
+};
+
+export const loginApi = async (email, password) => {
+    const res = await fetch(`${BASE_URL}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        throw new Error(data.error || 'Login failed.');
+    }
+
+    return data.data; // { token, user }
+};
+
+export const getMeApi = async (token) => {
+    const res = await fetch(`${BASE_URL}/api/auth/me`, {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+        }
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+        throw new Error(data.error || 'Session verification failed.');
+    }
+
+    return data.data; // user object
+};
+
+export const logoutApi = async (token) => {
+    try {
+        await fetch(`${BASE_URL}/api/auth/logout`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            }
+        });
+    } catch {
+        // Ignore network errors during logout
+    }
+};

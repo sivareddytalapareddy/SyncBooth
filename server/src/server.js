@@ -4,6 +4,7 @@ import { Server as SocketIOServer } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import roomRoutes from './routes/roomRoutes.js';
+import authRoutes from './routes/authRoutes.js';
 import { setupSocketHandlers } from './services/socketService.js';
 import { roomManager } from './rooms/roomManager.js';
 
@@ -17,14 +18,16 @@ const CLIENT_URL = process.env.CLIENT_URL || '*';
 
 // Middleware
 app.use(cors({
-    origin: CLIENT_URL,
-    methods: ['GET', 'POST', 'DELETE'],
+    origin: CLIENT_URL === '*' ? true : CLIENT_URL,
+    methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true
 }));
 app.use(express.json());
 
 // REST Routes
 app.use('/api', roomRoutes);
+app.use('/api/auth', authRoutes);
 
 // Socket.IO Setup
 const io = new SocketIOServer(server, {
