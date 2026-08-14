@@ -5,7 +5,7 @@ dotenv.config();
 
 /**
  * Connect to MongoDB database.
- * Enforces production-safe MONGODB_URI validation for cloud deployment (e.g. Render).
+ * Enforces production-safe MONGODB_URI validation for cloud deployment.
  */
 export const connectDB = async () => {
     if (mongoose.connection.readyState >= 1) {
@@ -15,15 +15,13 @@ export const connectDB = async () => {
     const isProduction = process.env.NODE_ENV === 'production';
     const uri = (process.env.MONGODB_URI || '').trim();
 
-    // In production, enforce presence of MONGODB_URI (e.g., MongoDB Atlas)
     if (isProduction && (!uri || uri.includes('localhost') || uri.includes('127.0.0.1'))) {
         console.error('================================================================');
-        console.error('[FATAL ERROR] Production MongoDB Configuration Error');
-        console.error('MONGODB_URI environment variable is missing or points to localhost.');
-        console.error('Render backend requires a valid MongoDB Atlas connection string.');
-        console.error('Please add MONGODB_URI in Render Web Service -> Environment Variables.');
+        console.error('[FATAL ERROR] MONGODB_URI is missing in Render Environment Variables.');
+        console.error('Please go to Render Dashboard -> Web Service -> Environment');
+        console.error('Add MONGODB_URI=mongodb+srv://Sync:I26A1657Siv@syncbooth-db.xvneteq.mongodb.net/syncbooth?retryWrites=true&w=majority&appName=syncbooth-db');
         console.error('================================================================');
-        process.exit(1);
+        throw new Error('MONGODB_URI is missing in production environment');
     }
 
     const targetUri = uri || 'mongodb://localhost:27017/syncbooth';
@@ -34,10 +32,6 @@ export const connectDB = async () => {
         return conn;
     } catch (error) {
         console.error(`[MongoDB] Connection Error: ${error.message}`);
-        if (isProduction || process.env.NODE_ENV !== 'test') {
-            console.error('[MongoDB] Unable to connect to database. Terminating process.');
-            process.exit(1);
-        }
         throw error;
     }
 };
