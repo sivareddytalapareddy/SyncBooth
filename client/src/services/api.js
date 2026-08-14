@@ -1,11 +1,14 @@
 /**
- * Target Server Base URL Resolution
- * Uses VITE_SERVER_URL environment variable in production, fallback to relative path or localhost in dev.
+ * Dynamic Server URL Resolution
  */
 export const getTargetServerUrl = () => {
     const envUrl = import.meta.env.VITE_SERVER_URL;
     if (envUrl && typeof envUrl === 'string' && envUrl.trim() !== '') {
         return envUrl.trim().replace(/\/$/, '');
+    }
+    // Fallback for Vercel deployment if VITE_SERVER_URL environment variable was not set at build time
+    if (typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')) {
+        return 'https://syncbooth-ua65.onrender.com';
     }
     return '';
 };
@@ -42,13 +45,13 @@ const apiFetch = async (endpoint, options = {}, retries = 2) => {
 
             return data;
         } catch (err) {
-            // Retry network/fetch errors caused by backend cold start
+            // Retry network/fetch errors caused by Render free-tier cold start
             if (attempt < retries && (err.name === 'TypeError' || (err.message && err.message.includes('fetch')))) {
-                await new Promise((resolve) => setTimeout(resolve, 2000));
+                await new Promise((resolve) => setTimeout(resolve, 2500));
                 continue;
             }
             if (err.name === 'TypeError' || (err.message && err.message.includes('Failed to fetch'))) {
-                throw new Error('Backend server is starting up or unreachable. Please verify VITE_SERVER_URL and try again.');
+                throw new Error('Backend server is waking up or unreachable. Please wait a few seconds and click again.');
             }
             throw err;
         }
