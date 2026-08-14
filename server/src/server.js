@@ -15,7 +15,7 @@ dotenv.config();
 const app = express();
 const server = http.createServer(app);
 
-// Enable trust proxy for HTTPS hosting environments like Render/Heroku
+// Enable trust proxy for HTTPS hosting environments like Render
 app.set('trust proxy', 1);
 
 const PORT = process.env.PORT || 5000;
@@ -40,7 +40,7 @@ app.use(cors({
         if (isAllowedOrigin(origin)) {
             callback(null, true);
         } else {
-            callback(null, true); // Allow during initial setup
+            callback(null, true);
         }
     },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -78,12 +78,12 @@ setInterval(() => {
     roomManager.cleanStaleRooms();
 }, 30 * 60 * 1000);
 
-// Start server if main module
+// Start server on all network interfaces (0.0.0.0) for Render compatibility
 if (process.env.NODE_ENV !== 'test') {
-    server.listen(PORT, () => {
+    server.listen(PORT, '0.0.0.0', () => {
         console.log(`=================================`);
-        console.log(`SyncBooth Backend Server Running`);
-        console.log(`HTTP API: http://localhost:${PORT}/api`);
+        console.log(`SyncBooth Backend Server Running on 0.0.0.0:${PORT}`);
+        console.log(`HTTP API: http://0.0.0.0:${PORT}/api`);
         console.log(`Socket.IO Signaling: Ready`);
         console.log(`=================================`);
     });
